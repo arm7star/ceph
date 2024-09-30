@@ -17,246 +17,307 @@ MIRROR_IMAGE_MODE=snapshot
 setup
 testlog "TEST: create group and test replay"
 start_mirrors ${CLUSTER1}
+check_daemon_running ${CLUSTER1}
 group=test-group
-create_group_and_enable_mirror ${CLUSTER2} ${POOL} ${group}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 0
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
-wait_for_group_present ${CLUSTER1} ${POOL} ${group} 'present'
+create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${group}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 0
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 0
+wait_for_group_present ${CLUSTER1} ${POOL} ${group} 0
 if [ -z "${RBD_MIRROR_USE_RBD_MIRROR}" ]; then
-  wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group} 'down+unknown'
+  wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group} 'down+unknown'
+fi
+
+if [ -n "${NEW_TEST}" ] 
+then
+  testlog "TEST: create another group and test replay of both"
+  group0=test-group0
+  create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${group0}
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group0} 0
+  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group0} 'up+replaying' 0
+  wait_for_group_present ${CLUSTER1} ${POOL} ${group0} 0
+  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 0
+  if [ -z "${RBD_MIRROR_USE_RBD_MIRROR}" ]; then
+    wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group0} 'down+unknown'
+    wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group} 'down+unknown'
+  fi
 fi
 
 testlog "TEST: add image to group and test replay"
 image=test-image
 create_image ${CLUSTER2} ${POOL} ${image}
-group_add_image ${CLUSTER2} ${POOL} ${group} ${POOL} ${image}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
+group_image_add ${CLUSTER2} ${POOL}/${group} ${POOL}/${image}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
 write_image ${CLUSTER2} ${POOL} ${image} 100
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image}
 
-testlog "TEST: test replay with remove image and later add the same"
-group_remove_image ${CLUSTER2} ${POOL} ${group} ${POOL} ${image}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 0
-group_add_image ${CLUSTER2} ${POOL} ${group} ${POOL} ${image}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
+if [ -n "${NEW_TEST}" ] 
+then
+  testlog "TEST: test replay with remove image and later add the same"
+  group_image_remove ${CLUSTER2} ${POOL}/${group} ${POOL}/${image}
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 0
+  group_image_add ${CLUSTER2} ${POOL}/${group} ${POOL}/${image}
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
+
+  testlog "TEST: add image from a different pool to group and test replay"
+  image0=test-image-diff-pool
+  create_image ${CLUSTER2} ${PARENT_POOL} ${image0}
+  group_image_add ${CLUSTER2} ${POOL}/${group} ${PARENT_POOL}/${image0}
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 2
+  wait_for_image_present ${CLUSTER1} ${PARENT_POOL} ${image0} 'present'
+  write_image ${CLUSTER2} ${PARENT_POOL} ${image0} 100
+  wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying'
+  compare_images ${PARENT_POOL} ${image0}
+  #group_image_remove ${CLUSTER1} ${POOL}/${group} ${PARENT_POOL}/${image0}
+
+  testlog "TEST: create user group snapshots and test replay"
+  snap=snap1
+  group_snap_create ${CLUSTER2} ${POOL}/${group} ${snap}
+  output=$(rbd --cluster ${CLUSTER2} group snap ls ${POOL}/${group})
+  echo $output
+  wait_for_group_replay_started  ${CLUSTER1} ${POOL}/${group} 2
+  wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+  # TODO verify output is as expected, don't just print it
+  output=$(rbd --cluster ${CLUSTER2} group snap ls ${POOL}/${group})
+  echo $output
+  output=$(rbd --cluster ${CLUSTER1} group snap ls ${POOL}/${group})
+  echo $output
+  check_group_snap_exists ${CLUSTER1} ${POOL}/${group} ${snap}
+fi
 
 testlog "TEST: stop mirror, create group, start mirror and test replay"
 stop_mirrors ${CLUSTER1}
 group1=test-group1
-create_group_and_enable_mirror ${CLUSTER2} ${POOL} ${group1}
+create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${group1}
 image1=test-image1
 create_image ${CLUSTER2} ${POOL} ${image1}
-group_add_image ${CLUSTER2} ${POOL} ${group1} ${POOL} ${image1}
+group_image_add ${CLUSTER2} ${POOL}/${group1} ${POOL}/${image1}
 start_mirrors ${CLUSTER1}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group1} 1
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group1}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+replaying'
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group1} 1
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+replaying' 1
 if [ -z "${RBD_MIRROR_USE_RBD_MIRROR}" ]; then
-  wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group1} 'down+unknown'
+  wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group1} 'down+unknown' 0
 fi
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image1}
 
 testlog "TEST: test the first group is replaying after restart"
 write_image ${CLUSTER2} ${POOL} ${image} 100
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image}
 
 if [ -z "${RBD_MIRROR_USE_RBD_MIRROR}" ]; then
   testlog "TEST: stop/start/restart group via admin socket"
 
   admin_daemons ${CLUSTER1} rbd mirror group stop ${POOL}/${group1}
-  wait_for_group_replay_stopped ${CLUSTER1} ${POOL} ${group1} 1
-  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+stopped'
+  wait_for_group_replay_stopped ${CLUSTER1} ${POOL}/${group1}
+  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+stopped' 0
 
   admin_daemons ${CLUSTER1} rbd mirror group start ${POOL}/${group1}
-  wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group1} 1
-  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+replaying'
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group1} 1
+  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+replaying' 1
 
   admin_daemons ${CLUSTER1} rbd mirror group restart ${POOL}/${group1}
-  wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group1} 1
-  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+replaying'
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group1} 1
+  wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+replaying' 1
 
   flush ${CLUSTER1}
   admin_daemons ${CLUSTER1} rbd mirror group status ${POOL}/${group1}
 fi
 
+if [ -n "${NEW_TEST}" ] 
+then
+  testlog "TEST: add a large image to group and test replay"
+  big_image=test-image-big
+  create_image ${CLUSTER2} ${PARENT_POOL} ${big_image} 4G
+  group_image_add ${CLUSTER2} ${POOL}/${group} ${PARENT_POOL}/${big_image}
+  write_image ${CLUSTER2} ${PARENT_POOL} ${big_image} 1024 4194304
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 3
+  wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+  test_group_and_image_sync_status ${CLUSTER1} ${CLUSTER2} ${POOL}/${group} ${PARENT_POOL}/${big_image}
+  group_image_remove ${CLUSTER2} ${POOL}/${group} ${PARENT_POOL}/${big_image}
+  remove_image_retry ${CLUSTER2} ${PARENT_POOL} ${big_image}
+  wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 2
+  wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+fi
+
 testlog "TEST: test group rename"
 new_name="${group}_RENAMED"
-rename_group ${CLUSTER2} ${POOL} ${group} ${new_name}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${new_name} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${new_name} 'up+replaying'
-rename_group ${CLUSTER2} ${POOL} ${new_name} ${group}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
+group_rename ${CLUSTER2} ${POOL}/${group} ${POOL}/${new_name}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${new_name} 1
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${new_name} 'up+replaying' 1
+group_rename ${CLUSTER2} ${POOL}/${new_name} ${POOL}/${group}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
 
 testlog "TEST: failover and failback"
 start_mirrors ${CLUSTER2}
 
 testlog " - demote and promote same cluster"
-demote_group ${CLUSTER2} ${POOL} ${group1}
-wait_for_group_replay_stopped ${CLUSTER1} ${POOL} ${group1} 1
+mirror_group_demote ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_replay_stopped ${CLUSTER1} ${POOL}/${group1}
 
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group1} 'up+stopped'
-promote_group ${CLUSTER2} ${POOL} ${group1}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group1} 1
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+stopped' 0
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group1} 'up+stopped' 0
+mirror_group_promote ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group1} 1
 
 write_image ${CLUSTER2} ${POOL} ${image1} 100
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group1}
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group1}
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image1}
 
 testlog " - failover (unmodified)"
-demote_group ${CLUSTER2} ${POOL} ${group}
-wait_for_group_replay_stopped ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group} 'up+stopped'
-promote_group ${CLUSTER1} ${POOL} ${group}
-wait_for_group_replay_started ${CLUSTER2} ${POOL} ${group} 1
+mirror_group_demote ${CLUSTER2} ${POOL}/${group}
+wait_for_group_replay_stopped ${CLUSTER1} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+stopped' 0
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group} 'up+stopped' 0
+mirror_group_promote ${CLUSTER1} ${POOL}/${group}
+wait_for_group_replay_started ${CLUSTER2} ${POOL}/${group} 1
 
 testlog " - failback (unmodified)"
-demote_group ${CLUSTER1} ${POOL} ${group}
-wait_for_group_replay_stopped ${CLUSTER2} ${POOL} ${group} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group} 'up+stopped'
-promote_group ${CLUSTER2} ${POOL} ${group}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group} 'up+stopped'
+mirror_group_demote ${CLUSTER1} ${POOL}/${group}
+wait_for_group_replay_stopped ${CLUSTER2} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+stopped' 0
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group} 'up+stopped' 0
+mirror_group_promote ${CLUSTER2} ${POOL}/${group}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group} 'up+stopped' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image}
 
 testlog " - failover"
-demote_group ${CLUSTER2} ${POOL} ${group1}
-wait_for_group_replay_stopped ${CLUSTER1} ${POOL} ${group1} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group1} 'up+stopped'
-promote_group ${CLUSTER1} ${POOL} ${group1}
-wait_for_group_replay_started ${CLUSTER2} ${POOL} ${group1} 1
+mirror_group_demote ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_replay_stopped ${CLUSTER1} ${POOL}/${group1}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+stopped' 0
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group1} 'up+stopped' 0
+mirror_group_promote ${CLUSTER1} ${POOL}/${group1}
+wait_for_group_replay_started ${CLUSTER2} ${POOL}/${group1} 1
 write_image ${CLUSTER1} ${POOL} ${image1} 100
-wait_for_group_replay_complete ${CLUSTER2} ${CLUSTER1} ${POOL} ${group1}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group1} 'up+replaying'
+wait_for_group_replay_complete ${CLUSTER2} ${CLUSTER1} ${POOL}/${group1}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+stopped' 1
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group1} 'up+replaying' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image1}
 
 testlog " - failback"
-demote_group ${CLUSTER1} ${POOL} ${group1}
-wait_for_group_replay_stopped ${CLUSTER2} ${POOL} ${group1} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group1} 'up+stopped'
-promote_group ${CLUSTER2} ${POOL} ${group1}
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group1} 1
+mirror_group_demote ${CLUSTER1} ${POOL}/${group1}
+wait_for_group_replay_stopped ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+stopped' 0
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group1} 'up+stopped' 0
+mirror_group_promote ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group1} 1
 write_image ${CLUSTER2} ${POOL} ${image1} 100
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group1}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group1} 'up+replaying'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group1} 'up+stopped'
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group1}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group1} 'up+replaying' 1
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group1} 'up+stopped' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image1}
 
 testlog " - force promote"
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
 write_image ${CLUSTER2} ${POOL} ${image} 100
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL} ${group}
-promote_group ${CLUSTER1} ${POOL} ${group} '--force'
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${group}
+mirror_group_promote ${CLUSTER1} ${POOL}/${group} '--force'
 
-wait_for_group_replay_stopped ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_replay_stopped ${CLUSTER2} ${POOL} ${group} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+stopped'
-wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL} ${group} 'up+stopped'
+wait_for_group_replay_stopped ${CLUSTER1} ${POOL}/${group}
+wait_for_group_replay_stopped ${CLUSTER2} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+stopped' 0
+wait_for_group_status_in_pool_dir ${CLUSTER2} ${POOL}/${group} 'up+stopped' 0
 write_image ${CLUSTER1} ${POOL} ${image} 100
 write_image ${CLUSTER2} ${POOL} ${image} 100
-group_remove_image ${CLUSTER1} ${POOL} ${group} ${POOL} ${image}
+group_image_remove ${CLUSTER1} ${POOL}/${group} ${POOL}/${image}
 remove_image_retry ${CLUSTER1} ${POOL} ${image}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'deleted'
-remove_group ${CLUSTER1} ${POOL} ${group}
+group_remove ${CLUSTER1} ${POOL}/${group}
 
 testlog "TEST: disable mirroring / delete non-primary group"
-disable_group_mirror ${CLUSTER2} ${POOL} ${group}
+mirror_group_disable ${CLUSTER2} ${POOL}/${group}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'deleted'
-wait_for_group_present ${CLUSTER1} ${POOL} ${group} 'deleted'
-enable_group_mirror ${CLUSTER2} ${POOL} ${group}
-wait_for_group_present ${CLUSTER1} ${POOL} ${group} 'present' 1
+wait_for_group_not_present ${CLUSTER1} ${POOL} ${group}
+mirror_group_enable ${CLUSTER2} ${POOL}/${group}
+wait_for_group_present ${CLUSTER1} ${POOL} ${group} 1
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
 
 testlog "TEST: disable mirror while daemon is stopped"
 stop_mirrors ${CLUSTER1}
 stop_mirrors ${CLUSTER2}
-disable_group_mirror ${CLUSTER2} ${POOL} ${group}
+mirror_group_disable ${CLUSTER2} ${POOL}/${group}
 if [ -z "${RBD_MIRROR_USE_RBD_MIRROR}" ]; then
-  wait_for_group_present ${CLUSTER1} ${POOL} ${group} 'present' 1
+  wait_for_group_present ${CLUSTER1} ${POOL} ${group} 1
   wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
 fi
 start_mirrors ${CLUSTER1}
 start_mirrors ${CLUSTER2}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'deleted'
-wait_for_group_present ${CLUSTER1} ${POOL} ${group} 'deleted'
-enable_group_mirror ${CLUSTER2} ${POOL} ${group}
-wait_for_group_present ${CLUSTER1} ${POOL} ${group} 'present' 1
+wait_for_group_not_present ${CLUSTER1} ${POOL} ${group}
+mirror_group_enable ${CLUSTER2} ${POOL}/${group}
+wait_for_group_present ${CLUSTER1} ${POOL} ${group} 1
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
 
 testlog "TEST: non-default namespace group mirroring"
 testlog " - replay"
-create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${NS1} ${group}
-create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${NS2} ${group}
+create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${NS1}/${group}
+create_group_and_enable_mirror ${CLUSTER2} ${POOL}/${NS2}/${group}
 create_image ${CLUSTER2} ${POOL}/${NS1} ${image}
 create_image ${CLUSTER2} ${POOL}/${NS2} ${image}
-group_add_image ${CLUSTER2} ${POOL}/${NS1} ${group} ${POOL}/${NS1} ${image}
-group_add_image ${CLUSTER2} ${POOL}/${NS2} ${group} ${POOL}/${NS2} ${image}
-wait_for_group_replay_started ${CLUSTER1} ${POOL}/${NS1} ${group} 1
-wait_for_group_replay_started ${CLUSTER1} ${POOL}/${NS2} ${group} 1
+group_image_add ${CLUSTER2} ${POOL}/${NS1}/${group} ${POOL}/${NS1}/${image}
+group_image_add ${CLUSTER2} ${POOL}/${NS2}/${group} ${POOL}/${NS2}/${image}
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${NS1}/${group} 1
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${NS2}/${group} 1
 write_image ${CLUSTER2} ${POOL}/${NS1} ${image} 100
 write_image ${CLUSTER2} ${POOL}/${NS2} ${image} 100
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${NS1} ${group}
-wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${NS2} ${group}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${NS1} ${group} 'up+replaying'
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${NS2} ${group} 'up+replaying'
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${NS1}/${group}
+wait_for_group_replay_complete ${CLUSTER1} ${CLUSTER2} ${POOL}/${NS2}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${NS1}/${group} 'up+replaying' 1
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${NS2}/${group} 'up+replaying' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL}/${NS1} ${POOL}/${NS1} ${image}
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL}/${NS2} ${POOL}/${NS2} ${image}
 
 testlog " - disable mirroring / remove group"
-group_remove_image ${CLUSTER2} ${POOL}/${NS1} ${group} ${POOL}/${NS1} ${image}
+group_image_remove ${CLUSTER2} ${POOL}/${NS1}/${group} ${POOL}/${NS1}/${image}
 remove_image_retry ${CLUSTER2} ${POOL}/${NS1} ${image}
 wait_for_image_present ${CLUSTER1} ${POOL}/${NS1} ${image} 'deleted'
-remove_group ${CLUSTER1} ${POOL}/${NS1} ${group}
-wait_for_group_present ${CLUSTER1} ${POOL}/${NS1} ${group} 'deleted'
-disable_group_mirror ${CLUSTER2} ${POOL}/${NS2} ${group}
+group_remove ${CLUSTER1} ${POOL}/${NS1}/${group}
+wait_for_group_not_present ${CLUSTER1} ${POOL} ${NS1}/${group}
+mirror_group_disable ${CLUSTER2} ${POOL}/${NS2}/${group}
 wait_for_image_present ${CLUSTER1} ${POOL}/${NS2} ${image} 'deleted'
-wait_for_group_present ${CLUSTER1} ${POOL}/${NS2} ${group} 'deleted'
+wait_for_group_not_present ${CLUSTER1} ${POOL} ${NS2}/${group}
 
 testlog "TEST: simple group resync"
 image_id=$(get_image_id ${CLUSTER1} ${POOL} ${image})
 wait_for_image_present ${CLUSTER2} ${POOL} ${image} 'present'
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
-request_resync_group ${CLUSTER1} ${POOL} ${group}
+mirror_group_resync ${CLUSTER1} ${POOL}/${group}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'deleted' ${image_id}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image}
 
 testlog "TEST: request group resync while daemon is offline"
 image_id=$(get_image_id ${CLUSTER1} ${POOL} ${image})
 stop_mirrors ${CLUSTER1}
-request_resync_group ${CLUSTER1} ${POOL} ${group}
+mirror_group_resync ${CLUSTER1} ${POOL}/${group}
 start_mirrors ${CLUSTER1}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'deleted' ${image_id}
 wait_for_image_present ${CLUSTER1} ${POOL} ${image} 'present'
-wait_for_group_replay_started ${CLUSTER1} ${POOL} ${group} 1
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
+wait_for_group_replay_started ${CLUSTER1} ${POOL}/${group} 1
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
 compare_images ${CLUSTER1} ${CLUSTER2} ${POOL} ${POOL} ${image}
 
 testlog "TEST: split-brain"
-promote_group ${CLUSTER1} ${POOL} ${group} --force
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+stopped'
+mirror_group_promote ${CLUSTER1} ${POOL}/${group} --force
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+stopped' 0
 write_image ${CLUSTER1} ${POOL} ${image} 10
-demote_group ${CLUSTER1} ${POOL} ${group}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+error' 'split-brain'
-request_resync_group ${CLUSTER1} ${POOL} ${group}
-wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL} ${group} 'up+replaying'
+mirror_group_demote ${CLUSTER1} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+error' 0 'split-brain detected' 
+mirror_group_resync ${CLUSTER1} ${POOL}/${group}
+wait_for_group_status_in_pool_dir ${CLUSTER1} ${POOL}/${group} 'up+replaying' 1
 
 #TODO: Fix blocklisting IP's which are consequence of "TEST: stop mirror, create group, start mirror and test replay"
 #if [ -z "${RBD_MIRROR_USE_RBD_MIRROR}" ]; then
