@@ -87,16 +87,16 @@
       migration commit                  Commit image migration.
       migration execute                 Execute image migration.
       migration prepare                 Prepare image migration.
-      mirror group demote               Demote an group to non-primary for RBD
+      mirror group demote               Demote a group to non-primary for RBD
                                         mirroring.
-      mirror group disable              Disable RBD mirroring for an group.
-      mirror group enable               Enable RBD mirroring for an group.
-      mirror group promote              Promote an group to primary for RBD
+      mirror group disable              Disable RBD mirroring for a group.
+      mirror group enable               Enable RBD mirroring for a group.
+      mirror group promote              Promote a group to primary for RBD
                                         mirroring.
       mirror group resync               Force resync to primary group for RBD
                                         mirroring.
       mirror group snapshot             Create RBD mirroring group snapshot.
-      mirror group status               Show RBD mirroring status for an group.
+      mirror group status               Show RBD mirroring status for a group.
       mirror image demote               Demote an image to non-primary for RBD
                                         mirroring.
       mirror image disable              Disable RBD mirroring for an image.
@@ -1697,7 +1697,7 @@
                                  [--group <group>] 
                                  <group-spec> 
   
-  Demote an group to non-primary for RBD mirroring.
+  Demote a group to non-primary for RBD mirroring.
   
   Positional arguments
     <group-spec>         group specification
@@ -1713,7 +1713,7 @@
                                   [--namespace <namespace>] [--group <group>] 
                                   <group-spec> 
   
-  Disable RBD mirroring for an group.
+  Disable RBD mirroring for a group.
   
   Positional arguments
     <group-spec>         group specification
@@ -1730,7 +1730,7 @@
                                  [--group <group>] 
                                  <group-spec> <mode> 
   
-  Enable RBD mirroring for an group.
+  Enable RBD mirroring for a group.
   
   Positional arguments
     <group-spec>         group specification
@@ -1748,7 +1748,7 @@
                                   [--namespace <namespace>] [--group <group>] 
                                   <group-spec> 
   
-  Promote an group to primary for RBD mirroring.
+  Promote a group to primary for RBD mirroring.
   
   Positional arguments
     <group-spec>         group specification
@@ -1801,7 +1801,7 @@
                                  [--pretty-format] 
                                  <group-spec> 
   
-  Show RBD mirroring status for an group.
+  Show RBD mirroring status for a group.
   
   Positional arguments
     <group-spec>         group specification
